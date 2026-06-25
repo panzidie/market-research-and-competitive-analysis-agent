@@ -3,8 +3,7 @@ import os
 from datetime import datetime
 from typing import Any, Dict
 
-from config.prompts import ANALYST_PROMPT
-from config.skills import DATA_EXTRACTION_TEMPLATE, SWOT_ANALYSIS_TEMPLATE
+from config.prompt_loader import get_analyst_prompt, get_data_extraction_template, get_swot_analysis_template
 
 from core.state import AgentState
 from core.llm import get_llm
@@ -43,11 +42,11 @@ def extract_node(state: AgentState) -> Dict[str, Any]:
             messages=[{
                 "role": "user",
                 "content": f"""{memory_context}
-{ANALYST_PROMPT}
+{get_analyst_prompt()}
 
-{DATA_EXTRACTION_TEMPLATE}
+{get_data_extraction_template()}
 
-{SWOT_ANALYSIS_TEMPLATE}
+{get_swot_analysis_template()}
 
 ---
 分析以下竞品信息，每条分析结论必须标注数据来源（用 [来源N] 引用）。

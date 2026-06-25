@@ -1,8 +1,3 @@
----
-name: competitor-matrix
-description: 建立竞品功能对比矩阵，进行横向对比分析
----
-
 # 竞品矩阵技能
 
 ## 触发条件

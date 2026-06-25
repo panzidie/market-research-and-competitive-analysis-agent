@@ -3,8 +3,7 @@ import os
 from datetime import datetime
 from typing import Any, Dict
 
-from config.prompts import WRITER_PROMPT, FACT_CHECKER_PROMPT
-from config.skills import COMPETITOR_MATRIX_TEMPLATE
+from config.prompt_loader import get_writer_prompt, get_competitor_matrix_template
 
 from core.state import AgentState
 from core.llm import get_llm
@@ -67,9 +66,9 @@ def report_node(state: AgentState) -> Dict[str, Any]:
             messages=[{
                 "role": "user",
                 "content": f"""{memory_context}
-{WRITER_PROMPT}
+{get_writer_prompt()}
 
-{COMPETITOR_MATRIX_TEMPLATE}
+{get_competitor_matrix_template()}
 
 ---
 根据以下分析结果，生成一篇专业的竞品分析报告（Markdown 格式）。

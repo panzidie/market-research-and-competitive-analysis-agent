@@ -1,8 +1,3 @@
----
-name: swot-analysis
-description: 对竞品或市场进行 SWOT 分析（优势、劣势、机会、威胁）
----
-
 # SWOT 分析技能
 
 ## 触发条件
