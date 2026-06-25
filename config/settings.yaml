@@ -1,0 +1,40 @@
+# 全局业务配置
+app:
+  name: "竞品分析智能体"
+  version: "1.0.0"
+  debug: false
+
+# LLM 配置
+llm:
+  default_model: "deepseek-v3"
+  max_retries: 3
+  timeout: 120
+  temperature: 0.3
+  models:
+    deepseek-v3:
+      provider: "openai"
+      model_id: "deepseek-chat"
+      base_url: "https://api.deepseek.com/v1"
+      max_tokens: 8192
+    deepseek-r1:
+      provider: "openai"
+      model_id: "deepseek-reasoner"
+      base_url: "https://api.deepseek.com/v1"
+      max_tokens: 8192
+
+# 搜索配置
+search:
+  max_results: 10
+  max_scrape_pages: 5
+  request_timeout: 30
+
+# 重试与熔断
+circuit_breaker:
+  max_error_count: 5
+  reset_after_seconds: 300
+
+# 向量存储
+vector_store:
+  collection_name: "competitor_docs"
+  embedding_dim: 768
+  top_k: 5

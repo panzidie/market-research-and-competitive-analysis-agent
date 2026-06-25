@@ -1,0 +1,12 @@
+version: "3.8"
+
+services:
+  competitor-agent:
+    build: .
+    container_name: competitor-agent
+    env_file:
+      - .env
+    volumes:
+      - ./data:/app/data
+      - ./config:/app/config:ro
+    command: ["竞品名称"]
