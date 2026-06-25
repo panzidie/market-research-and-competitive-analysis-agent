@@ -3,6 +3,9 @@ import os
 from datetime import datetime
 from typing import Any, Dict
 
+from config.prompts import ANALYST_PROMPT
+from config.skills import DATA_EXTRACTION_TEMPLATE, SWOT_ANALYSIS_TEMPLATE
+
 from core.state import AgentState
 from core.llm import get_llm
 from core.memory import ShortTermMemory
@@ -40,15 +43,22 @@ def extract_node(state: AgentState) -> Dict[str, Any]:
             messages=[{
                 "role": "user",
                 "content": f"""{memory_context}
-分析以下竞品信息，提取结构化数据。每条分析结论必须标注数据来源（用 [来源N] 引用）。
+{ANALYST_PROMPT}
+
+{DATA_EXTRACTION_TEMPLATE}
+
+{SWOT_ANALYSIS_TEMPLATE}
+
+---
+分析以下竞品信息，每条分析结论必须标注数据来源（用 [来源N] 引用）。
 
 {combined_text}
 
 请输出：
-1. 产品名称
+1. 产品名称和所属公司
 2. 核心功能列表（每项标注来源）
 3. 定价信息（标注来源）
-4. 目标用户
+4. 目标用户画像
 5. SWOT 分析（每点标注来源）
 6. 优劣势总结""",
             }],
