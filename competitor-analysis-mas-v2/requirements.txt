@@ -1,0 +1,16 @@
+# 智能竞品分析多Agent系统 — 依赖清单
+# pip install -r requirements.txt
+
+# ======== 核心依赖 ========
+requests>=2.28.0           # 千帆API + 百度搜索 HTTP调用（LLM/搜索模式必需）
+
+# ======== 环境变量加载 ========
+python-dotenv>=1.0.0       # 从 .env 文件加载环境变量
+
+# ======== 编排框架 (LangGraph) ========
+langgraph>=1.0.0           # LangGraph StateGraph 编排引擎
+langchain-core>=1.0.0      # LangChain 核心类型和工具
+langchain-openai>=0.3.0    # LangChain OpenAI 适配器（用于 ChatOpenAI tool calling）
+
+# ======== 搜索工具 ========
+uapi>=1.0.0                # UAPI 智能搜索客户端（用于搜索增强）
