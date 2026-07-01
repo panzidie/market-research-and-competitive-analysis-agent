@@ -27,3 +27,7 @@ RAG/venv/
 
 # Project output
 output/
+
+# Experiment docs
+0实验：将 RAG 封装为 Skill.md
+1实验5-4_Agent单工具调用(修改)_LangChain扩展版.md
