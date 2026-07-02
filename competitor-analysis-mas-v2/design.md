@@ -1,45 +1,59 @@
 # 智能竞品分析多Agent系统
 
+> 最后更新: 2026-07-01 | 设计文档与实际代码保持同步
+
 ## 一、系统总体架构
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                      竞品分析协同环境                              │
-│                                                                  │
-│                        ┌──────────────┐                          │
-│                        │  竞品发现     │                          │
-│                        │  Agent       │                          │
-│                        │ (搜索+筛选)  │                          │
-│                        └──────┬───────┘                          │
-│                               │ 发现N个竞品                      │
-│                               ▼                                  │
-│                        ┌──────────────┐                          │
-│                        │  数据采集     │                          │
-│                        │  Agent       │                          │
-│                        │ (多源抓取)   │                          │
-│                        └──────┬───────┘                          │
-│                               │ 逐竞品采集数据                    │
-│              ┌────────────────┼────────────────┐                 │
-│              ▼                ▼                ▼                 │
-│     ┌──────────────┐  ┌──────────────┐  ┌──────────────┐       │
-│     │  产品分析     │  │  定价分析     │  │  市场分析     │       │
-│     │  Agent       │  │  Agent       │  │  Agent       │       │
-│     │ (功能矩阵)   │  │ (价格策略)   │  │ (份额趋势)   │       │
-│     └──────┬───────┘  └──────┬───────┘  └──────┬───────┘       │
-│            │                 │                 │                │
-│            └────────────────┼─────────────────┘                │
-│                             ▼                                   │
-│                    ┌──────────────┐                             │
-│                    │  策略建议     │                             │
-│                    │  Agent       │                             │
-│                    │ (综合+建议)  │                             │
-│                    └──────────────┘                             │
-│                                                                  │
-│    ┌─────────────┐  ┌─────────────┐  ┌─────────────┐           │
-│    │ 百度AI搜索  │  │ 千帆LLM     │  │ 本地Ollama  │           │
-│    │ (信息采集)  │  │ (智能分析)  │  │ (本地推理)  │           │
-│    └─────────────┘  └─────────────┘  └─────────────┘           │
-└─────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────┐
+│                     竞品分析协同环境                               │
+│                                                                   │
+│   ┌────────────────────────────────────────────────┐             │
+│   │  ConversationalAgent (对话路由 + 安全检测)      │             │
+│   │  ┌─ Prompt Injection 检测 ── 意图分类 ── 路由  │             │
+│   │  │  通用对话 → ReAct (web_search + rag_search) │             │
+│   │  │  竞品分析 → LangGraph 全管道                 │             │
+│   │  └─ LongTermMemory (SQLite + ChromaDB) ───────┘              │
+│   └────────────────────────────────────────────────┘             │
+│                              │                                     │
+│                              ▼                                     │
+│   ┌──────────────────────────────────────────────────┐            │
+│   │  LangGraph StateGraph DAG 编排                     │            │
+│   │                                                  │            │
+│   │   ┌──────────────┐    ┌──────────────┐          │            │
+│   │   │  竞品发现     │ →  │  数据采集     │          │            │
+│   │   │  Agent       │    │  Agent       │          │            │
+│   │   │ (搜索+筛选)  │    │ (ReAct决策)  │          │            │
+│   │   └──────┬───────┘    └──────┬───────┘          │            │
+│   │          │                   │ 发现N个竞品        │            │
+│   │          ▼                   ▼                   │            │
+│   │   ┌────────────────────────────────────┐         │            │
+│   │   │      parallel_analysis 节点        │         │            │
+│   │   │  (asyncio.gather 内部并行)          │         │            │
+│   │   └────────────────────────────────────┘         │            │
+│   │         │              │              │          │            │
+│   │         ▼              ▼              ▼          │            │
+│   │  ┌─────────┐  ┌─────────┐  ┌─────────┐         │            │
+│   │  │产品分析  │  │定价分析  │  │市场分析  │         │            │
+│   │  │Agent    │  │Agent    │  │Agent    │         │            │
+│   │  └────┬────┘  └────┬────┘  └────┬────┘         │            │
+│   │       └────────────┼────────────┘               │            │
+│   │                    ▼                             │            │
+│   │           ┌──────────────┐                       │            │
+│   │           │  策略建议     │                       │            │
+│   │           │  Agent       │                       │            │
+│   │           │ (综合+建议)  │                       │            │
+│   │           └──────────────┘                       │            │
+│   └──────────────────────────────────────────────────┘            │
+│                                                                   │
+│   搜索后端（三段降级链）          LLM 后端（三后端支持）            │
+│   Tavily → UAPI → 百度AI搜索    DeepSeek → 千帆 → Ollama          │
+│                                                                   │
+│   长期记忆（跨会话持久化）        安全机制                          │
+│   SQLite (精确检索)              Prompt Injection 检测             │
+│   ChromaDB (语义搜索)            权限白名单 / 输入清洗              │
+│                                                                   │
+└──────────────────────────────────────────────────────────────────┘
 ```
 
 **协作模式**：混合（串行采集 → 并行分析 → 串行汇总）
@@ -47,26 +61,28 @@
 **核心理念**：
 - **两段式采集**：先发现竞品列表，再逐竞品深度采集，避免盲目搜索
 - **三维并行分析**：产品/定价/市场三个维度独立，结果JSON格式传递给策略Agent
-- **竞品矩阵表**：产品分析Agent输出功能对比矩阵（✅/❌/🔶）
+- **竞品矩阵表**：产品分析Agent输出功能对比矩阵（✅/🔶/❌）
 - **策略Agent看到全貌**：三份分析报告汇聚后一次性输入，保证策略建议的系统性
+- **LangGraph StateGraph**：声明式 DAG 定义，天然支持串行 + 并行 + 状态共享
+- **三层防护**：安全检测 → 意图分类 → 路由执行，拒绝注入攻击
 
 ## 二、Agent角色定义
 
 ### 1. 竞品发现Agent（DiscoveryAgent）
 - **职责**：根据用户产品描述，搜索并筛选出3~8个核心竞品
-- **LLM调用**：2次（关键词生成 + 结果筛选）
-- **外部工具**：百度AI搜索
+- **LLM调用**：2~3次（理解需求1次 + 关键词生成1次 + 结果筛选1次）
+- **外部工具**：SearchClient（Tavily → UAPI → 百度AI搜索，自动多后端降级）
 - **输入**：用户产品描述（string）
 - **输出**：CompetitorList（竞品名称+简介列表）
-- **降级策略**：直接使用产品描述作为搜索关键词，取搜索结果前5个
+- **降级策略**：规则引擎关键词生成 + 通过搜索文本提取产品名称
 
 ### 2. 数据采集Agent（CollectionAgent）
 - **职责**：对每个竞品，采集产品功能、定价、用户评价、市场份额等信息
-- **LLM调用**：1+N次（拆解采集维度 + 逐竞品汇总）
-- **外部工具**：百度AI搜索
+- **LLM调用**：每竞品1个 ReAct 循环（含N次工具调用 + 1次汇总）
+- **外部工具**：ReAct 自主（web_search + rag_search），web_search 内部走 SearchClient
 - **输入**：CompetitorList + 用户产品描述
 - **输出**：dict[str, CompetitorData]（每竞品一份数据）
-- **降级策略**：直接使用固定搜索模板采集
+- **降级策略**：ReAct 失败 → 硬编码4条搜索query → LLM汇总 → 规则引擎
 
 ### 3. 产品分析Agent（ProductAgent）
 - **职责**：逐竞品对比功能矩阵，标注优势/劣势/差异点
@@ -352,35 +368,67 @@
 ### 技术栈
 - **语言**：Python 3.10+
 - **Agent框架**：基于原生Python + asyncio实现（零依赖，便于教学理解）
-- **LLM调用**：百度千帆API（ernie-x1-turbo-32k）+ 本地Ollama（qwen2.5:7b）
-- **搜索**：百度AI Search（baidu_search_v2数据源）
-- **并行执行**：asyncio.gather（三维分析并行阶段）
-- **数据格式**：JSON（Agent间数据传递）
+- **编排框架**：LangGraph StateGraph（声明式 DAG，天然状态共享 + 并行节点）
+- **LLM调用**：
+  - `llm_client.py` — 竞品分析 Agent 的 LLM 调用封装（DeepSeek/千帆/Ollama 三后端）
+  - `react_agent.py` — ReAct 自主决策引擎（基于 LangGraph's create_react_agent + LangChain ChatOpenAI）
+  - 默认主后端：DeepSeek API（deepseek-chat）
+  - 降级链（Provider 轴）：DeepSeek → Ollama（内置于 ReactAgent._build_model）
+  - 降级链（Logic 轴）：LLM 结果 → 规则引擎 → 占位数据（内置于各 Agent.run）
+- **搜索后端**：
+  - `search_client.py` — 统一搜索客户端，自动多后端降级
+  - SearchClient.search() 内部降级链：Tavily → UAPI → 百度AI搜索
+  - 工具层 (`tools.py` 的 `web_search`): 一调到底，不明确感知后端
+  - `batch_search()` — 批量搜索带间隔防限流
+  - `extract_text()` / `extract_links()` — 统一结果提取，兼容所有后端格式
+- **ReAct Agent**（LangGraph + LangChain）：
+  - LangGraph's `create_react_agent` 预制件，负责"思考-行动-观察"循环
+  - 内部 model = ChatOpenAI(DeepSeek).with_fallbacks(ChatOpenAI(Ollama))
+  - 挂载 _ThoughtPrinter 回调实时打印推理过程
+  - 工具列表: `web_search` + `rag_search`
+  - 支持 `task_message` (单次任务) 和 `messages` (多轮对话上下文)
+- **长期记忆**：`LongTermMemory` 三层存储（deque 滑动窗口 + SQLite + ChromaDB）
+- **安全机制**：`security.py` 提供 Prompt Injection 检测 + 权限白名单 + 输入清洗
+- **并行执行**：asyncio.gather（竞品间并行采集 + 三维分析并行阶段）
+- **数据格式**：JSON（Agent间数据传递）+ Pydantic/dataclass（内部类型安全）
 
-### 项目结构
+### 项目结构（实际）
 ```
 competitor-analysis-mas/
 ├── design.md                    # 本设计文档
-├── main.py                      # 主入口
-├── config.py                    # 配置（LLM双后端 + 搜索参数）
+├── main.py                      # 主入口（支持 --chat 交互模式 / 单次分析）
+├── config.py                    # 配置（DeepSeek/千帆/Ollama + Tavily/UAPI/百度）
+├── .gitignore                   # 排除 .env, __pycache__, output/, data/
+├── requirements.txt             # 依赖清单
+│
 ├── core/
-│   ├── __init__.py
-│   ├── llm_client.py            # LLM调用封装（千帆 + Ollama）
-│   ├── search_client.py         # 百度AI搜索客户端
-│   ├── prompt_loader.py         # 提示词模板加载器
-│   └── orchestrator.py          # 主控编排器（混合协作模式）
+│   ├── __init__.py              # 导出 llm_call, parse_llm_json, ConversationMemory, LongTermMemory
+│   ├── llm_client.py            # LLM调用封装（DeepSeek + 千帆 + Ollama 三后端）
+│   ├── search_client.py         # 统一搜索客户端（Tavily → UAPI → 百度自动降级）
+│   ├── react_agent.py           # ReAct 自主决策 Agent 引擎（LangGraph create_react_agent）
+│   ├── langgraph_orchestrator.py # LangGraph StateGraph 编排器（DAG: 串行→并行→串行）
+│   ├── state.py                 # AnalysisState TypedDict（DAG 全局状态类型定义）
+│   ├── tools.py                 # ReAct Agent 工具定义（web_search + rag_search）
+│   ├── security.py              # Prompt Injection 检测 + 权限白名单 + 输入清洗
+│   ├── memory.py                # 对话短期记忆（deque 滑动窗口）
+│   ├── long_term_memory.py      # 长期记忆（SQLite 精确检索 + ChromaDB 语义搜索）
+│   └── prompt_loader.py         # 提示词模板加载器
+│
 ├── agents/
 │   ├── __init__.py
-│   ├── base_agent.py            # Agent基类
-│   ├── discovery_agent.py       # 竞品发现Agent
-│   ├── collection_agent.py      # 数据采集Agent
-│   ├── product_agent.py         # 产品分析Agent
-│   ├── pricing_agent.py         # 定价分析Agent
-│   ├── market_agent.py          # 市场分析Agent
-│   └── strategy_agent.py        # 策略建议Agent
+│   ├── base_agent.py            # Agent基类（LLM调用 + 日志 + JSON解析）
+│   ├── conversational_agent.py  # 对话式智能体（安全检测 → 意图分类 → 路由）
+│   ├── discovery_agent.py       # 竞品发现Agent（搜索+筛选）
+│   ├── collection_agent.py      # 数据采集Agent（ReAct 自主决策 + 传统模式降级）
+│   ├── product_agent.py         # 产品分析Agent（功能对比矩阵）
+│   ├── pricing_agent.py         # 定价分析Agent（价格策略对比）
+│   ├── market_agent.py          # 市场分析Agent（份额/趋势/口碑）
+│   └── strategy_agent.py        # 策略建议Agent（差异化定位 + 行动方案）
+│
 ├── models/
 │   ├── __init__.py
-│   └── domain.py                # 领域模型
+│   └── domain.py                # 领域模型（dataclass 定义全部数据传输对象）
+│
 ├── prompts/                     # 提示词模板（.md格式，按##节分割）
 │   ├── discovery_agent.md
 │   ├── collection_agent.md
@@ -388,23 +436,52 @@ competitor-analysis-mas/
 │   ├── pricing_agent.md
 │   ├── market_agent.md
 │   └── strategy_agent.md
-├── data/                        # 示例数据
-└── output/                      # 分析报告输出目录
+│
+├── skill/                       # 技能包
+│   ├── __init__.py
+│   └── rag_skill/
+│       ├── __init__.py
+│       └── rag_skill.py         # rag_search 工具（PDF知识库检索）
+│
+├── test/                        # 测试套件
+│   ├── injection_test.py        # Prompt Injection 防护测试（10类×6入口=60项）
+│   ├── test_long_term_memory.py # 长期记忆测试
+│   ├── test_rag_qa.py           # RAG 知识库问答测试
+│   ├── test_react_standalone.py # ReAct Agent 独立测试
+│   └── test_uapi_search.py      # UAPI 搜索测试
+│
+├── data/                        # 运行时数据（gitignore）
+│   ├── long_term_memory.db      # SQLite 长期记忆数据库
+│   └── chroma_memory/           # ChromaDB 向量存储目录
+│
+├── output/                      # 分析报告输出（gitignore）
+│   ├── {product}_analysis_report.html
+│   ├── {product}_analysis_report.json
+│   └── injection_test_report_*.txt/json
+│
+└── prompts/                     # Agent 提示词模板
+    └── ... (6 个 .md 文件)
 ```
 
 ### 运行方式
 ```bash
-# 默认：千帆LLM + 百度搜索
+# 交互式对话模式（推荐）
+python3 main.py --chat
+
+# 规则引擎模式（零依赖，无需 API Key）
+python3 main.py --chat --rule
+
+# 单次竞品分析
 python3 main.py "飞书"
 
-# Ollama模式
+# 切换到本机 Ollama
 python3 main.py --ollama "飞书"
-
-# 详细模式（输出中间结果）
-python3 main.py --verbose "飞书"
 
 # 指定竞品数量
 python3 main.py --count 5 "飞书"
+
+# 详细模式（输出中间结果）
+python3 main.py --verbose "飞书"
 
 # 帮助
 python3 main.py help
@@ -439,13 +516,17 @@ CollectionAgent ──(dict[str, CompetitorData])──→ [并行]
 
 | Agent | 调用次数 | 调用策略 | 降级方案 |
 |-------|---------|---------|---------|
-| DiscoveryAgent | 2次 | 关键词生成1次 + 结果筛选1次 | 直接使用产品描述搜索 |
-| CollectionAgent | 1+N次 | 维度拆解1次 + 逐竞品汇总N次 | 固定模板搜索 |
-| ProductAgent | 1次 | 全量数据1次 | 关键词匹配对比 |
-| PricingAgent | 1次 | 全量数据1次 | 价格数字提取排序 |
-| MarketAgent | 1次 | 全量数据1次 | 关键词频率统计 |
-| StrategyAgent | 1次 | 三维分析1次 | SWOT模板填充 |
-| **总计** | **6+N次** | N=竞品数 | — |
+| ConversationalAgent | 1次 | 意图分类（LLM → 规则引擎关键词） | 关键词匹配分类 |
+| DiscoveryAgent | 2~3次 | 理解需求1次 + 关键词生成1次 + 结果筛选1次 | 规则引擎关键词生成+搜索文本提取 |
+| CollectionAgent | ~1次/竞品（ReAct） | ReAct 自主循环（含N次工具调用+1次汇总） | 硬编码4条搜索 → LLM汇总 → 规则引擎 |
+| ProductAgent | 1次 | 全量数据一次性分析 | 关键词匹配对比矩阵 |
+| PricingAgent | 1次 | 全量数据一次性分析 | 价格数字提取排序 |
+| MarketAgent | 1次 | 全量数据一次性分析 | 关键词频率统计 |
+| StrategyAgent | 1次 | 三维分析一次性输入 | SWOT模板填充 |
+| ReactAgent(对话) | 1个ReAct循环 | 多轮对话中的"思考-行动-观察"循环 | 规则引擎回复（_rule_reply） |
+| **总计** | **~8+N次** | N=竞品数 | 每一层都有规则引擎兜底 |
+
+> 注：与原始设计相比，实际加入了 ConversationalAgent 意图分类和长期记忆、安全检测等环节，但安全检测（正则匹配）和长期记忆（SQLite 写入）不消耗 LLM 调用。
 
 ## 八、设计要点与决策记录
 
@@ -468,3 +549,67 @@ CollectionAgent ──(dict[str, CompetitorData])──→ [并行]
 - ✅ 完整支持：功能完善，体验良好
 - 🔶 部分支持：有此功能但不够成熟或体验一般
 - ❌ 不支持：无此功能或仅规划中
+
+### 8.5 为什么改用 LangGraph StateGraph 而非自编编排器？
+- **声明式图定义**：add_node + add_edge = DAG，比手写编排更可读
+- **并行 fan-in 安全**：LangGraph 的单节点不会被多条入边重复触发，解决了`三个分析Agent → 策略Agent`的三条边会触发策略Agent被调用三次的问题
+- **状态共享**：TypedDict AnalysisState 在节点间自动传递，无需手动管理结果对象
+- **内置编译优化**：graph.compile() 自动检查图的连通性，避免悬空节点
+
+### 8.6 为什么并行分析在单节点内用 asyncio.gather，而非三条边 fan-in 到 Strategy？
+```
+错误方案 (三条边 fan-in):
+  discovery → collection → product_analysis ─┐
+                           → pricing_analysis ─┤→ strategy (被执行3次!)
+                           → market_analysis  ─┘
+
+正确方案 (单节点内并行):
+  discovery → collection → parallel_analysis → strategy
+                              ├─ product_analysis (asyncio.gather)
+                              ├─ pricing_analysis
+                              └─ market_analysis
+```
+LangGraph 的 add_edge 会导致目标节点被每条入边各执行一次。因此将三个分析 Agent 放在单个 `parallel_analysis` 节点内部，用 asyncio.gather 实现真正的并行，策略节点只被调用一次。
+
+### 8.7 为什么引入 RAG + 长期记忆？
+- **RAG 知识库**（`rag_search` Skill）：将行业研究报告 PDF 作为可检索的知识源，使 LLM 回答有事实依据，减少幻觉
+- **长期记忆 LT M**：三层架构（deque + SQLite + ChromaDB），跨会话恢复对话历史，支持语义搜索和关键词搜索历史分析报告
+- **设计原则**：LongTermMemory 包装 ConversationMemory，保持 API 完全兼容，降级友好
+
+### 8.8 安全机制的设计策略（三层防护）
+Prompt Injection 防护采用"3+6×10"架构：
+- **3 个防御层面**：
+  1. `security.py` 正则检测（输入层，命中即拒）
+  2. `conversational_agent.chat()` 前置拦截（调用层，检测结果直接返回）
+  3. `CONVERSATION_SYSTEM_PROMPT` 安全要求（LLM 层，即使绕过前两层也有行为约束）
+- **6 个测试入口点**：意图分类器、长期记忆、工具调用边界、系统提示词、输入清洗、DAG状态污染
+- **10 类攻击场景**：指令覆盖、系统泄露、角色扮演、分隔符绕过、编码绕过、RAG污染模拟、工具越权、无限循环、敏感信息、虚假状态断言
+
+当前检测通过率：70 项测试中 69 项通过（98.6%），2 项注意（非适用场景），0 项失败。
+
+### 8.9 搜索后端的多级降级策略
+```
+web_search (ReAct 工具)
+  ↓
+tools.py: _call_with_retry() 重试封装
+  ↓
+search_client.search(query)
+  ├─ 主后端 (tavily): 优先调用
+  ├─ 第一降级 (uapi): 主后端失败时自动切换
+  └─ 第二降级 (baidu): UAPI 也失败时最后尝试
+```
+每个后端有独立的 API Key 和配置，互不依赖。只有全部三个后端都失败时，搜索才报错。
+
+### 8.10 LLM 后端的 Provider 和 Logic 双轴降级
+```
+Provider 轴（基础设施层）:
+  主: ChatOpenAI(DeepSeek)
+  备: ChatOpenAI(Ollama)
+  轴行为: model.with_fallbacks([ollama]) — LangChain 原生 fallback 机制
+
+Logic 轴（业务逻辑层）:
+  主: LLM 模型返回 JSON / ReAct 最终回复
+  备: 规则引擎关键词匹配
+  轴行为: Agent.ask_llm_json() → None → Agent._rule_xxx()
+```
+两轴独立，互不影响。Provider 降级了但 Logic 仍在 LLM 路径上；Provider 正常但 Logic 降级了说明 LLM 输出不符合预期格式。

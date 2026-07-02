@@ -40,10 +40,17 @@ def build_index(cfg: AppConfig) -> VectorStore:
     )
     store.delete_collection()
 
+    # 如果 pdf_files 为空，自动扫描 data_dir 下所有 .pdf
+    pdf_files = list(cfg.pdf_files)
+    if not pdf_files:
+        for fname in sorted(os.listdir(cfg.data_dir)):
+            if fname.lower().endswith(".pdf"):
+                pdf_files.append(os.path.join(cfg.data_dir, fname))
+
     all_texts: list[str] = []
     all_metas: list[dict[str, str]] = []
 
-    for pdf_path in cfg.pdf_files:
+    for pdf_path in pdf_files:
         doc = loader.load(pdf_path)
         result = chunker.split_with_source(doc.text, doc.source)
 
@@ -131,11 +138,11 @@ def main(argv: list[str] | None = None) -> None:
         cfg = AppConfig.from_json(args.config)
     else:
         cfg = AppConfig(
-            chunk=ChunkConfig(size=300, overlap=50),
+            chunk=ChunkConfig(size=600, overlap=80),
             embedding=EmbeddingConfig(model_name="BAAI/bge-small-zh-v1.5", device="cpu"),
             retrieval=RetrievalConfig(n_results=3),
-            vector_store=VectorStoreConfig(persist_dir="chroma_db", collection_name="campus"),
-            pdf_files=("data/campus_manual.pdf", "data/library_rules.pdf"),
+            vector_store=VectorStoreConfig(persist_dir="chroma_db", collection_name="iResearch_Report"),
+            pdf_files=(),
         )
 
     # 将当前文件所在目录设为 root

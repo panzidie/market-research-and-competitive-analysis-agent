@@ -15,6 +15,15 @@ class Embedder:
 
     def __init__(self, model_name: str = "BAAI/bge-small-zh-v1.5", device: str = "cpu") -> None:
         logger.info("加载 Embedding 模型: %s (device=%s)", model_name, device)
+
+        # 抑制 SentenceTransformer 加载时的进度条和 load report 输出
+        import os as _os
+        _os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
+        _os.environ.setdefault("TRANSFORMERS_VERBOSITY", "error")
+        import logging as _logging
+        for _name in ("transformers", "sentence_transformers", "tokenizers"):
+            _logging.getLogger(_name).setLevel(_logging.ERROR)
+
         self.model = SentenceTransformer(model_name, device=device)
         self._dimension: Optional[int] = None
 
@@ -30,7 +39,7 @@ class Embedder:
         if not texts:
             return np.array([], dtype=np.float32)
         logger.debug("编码 %d 条文本...", len(texts))
-        return self.model.encode(texts, show_progress_bar=True)
+        return self.model.encode(texts, show_progress_bar=False)
 
     def encode_query(self, query: str) -> np.ndarray:
         """将单条查询编码为向量"""

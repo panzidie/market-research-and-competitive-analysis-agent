@@ -28,6 +28,17 @@ RAG/venv/
 # Project output
 output/
 
+# Long-term memory
+data/
+*.db
+
 # Experiment docs
 0实验：将 RAG 封装为 Skill.md
 1实验5-4_Agent单工具调用(修改)_LangChain扩展版.md
+
+# Doct - not for commit
+doct/
+
+# Agent / IDE artifacts
+.claude/worktrees/
+.workbuddy/

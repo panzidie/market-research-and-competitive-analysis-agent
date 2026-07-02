@@ -28,7 +28,7 @@ class ChunkResult:
 class TextChunker:
     """固定窗口文本切片器（带重叠窗口）"""
 
-    def __init__(self, chunk_size: int = 300, overlap: int = 50) -> None:
+    def __init__(self, chunk_size: int = 600, overlap: int = 80) -> None:
         if overlap >= chunk_size:
             raise ValueError(f"overlap({overlap}) 必须小于 chunk_size({chunk_size})")
         if chunk_size <= 0:

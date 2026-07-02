@@ -31,6 +31,7 @@ from langgraph.prebuilt import create_react_agent
 from langgraph.graph.state import CompiledStateGraph
 from langchain_openai import ChatOpenAI
 from langchain_core.tools import BaseTool
+from langchain_core.callbacks import BaseCallbackHandler
 
 import config
 
@@ -86,6 +87,91 @@ def _build_model(temperature: float = None) -> Optional[ChatOpenAI]:
         return models[0]
     return models[0].with_fallbacks(models[1:])
 
+class _ThoughtEmitter(BaseCallbackHandler):
+    """实时推送 ReAct 推理过程到前端"""
+
+    def __init__(self, emitter=None, agent_name: str = "ReAct"):
+        self._emitter = emitter
+        self._agent_name = agent_name
+        self._last_content: str = ""
+        self._call_index = 0
+        self._started = False
+
+    def on_chat_model_end(self, output, **kwargs):
+        """LLM 输出结束时发射事件"""
+        try:
+            msg = output.generations[0][0].message
+            content = getattr(msg, "content", "") or ""
+            tool_calls = getattr(msg, "tool_calls", []) or []
+
+            # 工具调用：即使 content 为空也要打印
+            if tool_calls:
+                names = [t.get("name", "?") for t in tool_calls]
+                # 用工具调用信息作为 THOUGHT 显示
+                thought = content.strip() if content.strip() else f"需要查询相关信息，决定调用 {names}"
+                if thought != self._last_content:
+                    self._last_content = thought
+                    print(f"\n  [ReAct] [THOUGHT] {thought[:200]}")
+                    print(f"  [ReAct] [ACTION] → 调用工具: {names}")
+
+                if self._emitter:
+                    self._emit_safe("react_thought", {
+                        "agent_name": self._agent_name, "thought": thought[:500],
+                    })
+                for tc in tool_calls:
+                    self._call_index += 1
+                    if self._emitter:
+                        self._emit_safe("react_action", {
+                            "agent_name": self._agent_name,
+                            "tool_name": tc.get("name", "?"),
+                            "tool_input": tc.get("args", {}),
+                            "call_index": self._call_index,
+                        })
+                return
+
+            # 纯文本回复（Final Answer 或 Thought）
+            if not content.strip():
+                return
+            if content.strip() == self._last_content:
+                return
+            self._last_content = content.strip()
+
+            print(f"\n  [ReAct] [THOUGHT] {content.strip()[:200]}")
+            if self._emitter:
+                self._emit_safe("react_thought", {
+                    "agent_name": self._agent_name, "thought": content.strip()[:500],
+                })
+        except Exception:
+            pass
+
+    def on_tool_end(self, output, **kwargs):
+        """工具执行结束时打印并发射 OBSERVATION 事件"""
+        try:
+            preview = str(output)[:300]
+            tool_name = kwargs.get("name", "?")
+            print(f"  [ReAct] [OBSERVE] ← {tool_name}: {preview}")
+            if self._emitter:
+                self._emit_safe("react_observation", {
+                    "agent_name": self._agent_name,
+                    "tool_name": tool_name,
+                    "result_preview": preview,
+                    "result_length": len(str(output)),
+                    "call_index": self._call_index,
+                })
+        except Exception:
+            pass
+
+    def _emit_safe(self, event_type: str, payload: dict):
+        """安全发射事件（同步 callback 中执行 async emit）"""
+        if self._emitter:
+            try:
+                import asyncio
+                loop = asyncio.get_event_loop()
+                if loop.is_running():
+                    loop.create_task(self._emitter.emit(event_type, payload))
+            except Exception:
+                pass
+
 
 # ── ReAct Agent 封装 ──
 
@@ -115,6 +201,7 @@ class ReactAgent:
         tools: list[BaseTool],
         max_iterations: int = 5,
         temperature: float = None,
+        event_emitter=None,
     ):
         """
 
@@ -123,11 +210,14 @@ class ReactAgent:
             tools: 可用工具列表
             max_iterations: 最大思考-行动-观察循环次数（默认 5）
             temperature: LLM 温度（默认使用 config.LLM_TEMPERATURE）
+            event_emitter: 事件发射器（用于实时推送 ReAct 推理过程）
         """
         self.system_prompt = system_prompt
         self.tools = tools
         self.max_iterations = max_iterations
         self.temperature = temperature
+        self._emitter = event_emitter
+        self._agent_name = "ReAct"
 
         # 创建模型 + 编译 ReAct 子图
         self.model = _build_model(temperature)
@@ -149,11 +239,13 @@ class ReactAgent:
         """ReAct 模式是否可用"""
         return self._graph is not None
 
-    async def run(self, task_message: str) -> Optional[dict]:
+    async def run(self, task_message: str = None, messages: list = None) -> Optional[dict]:
         """执行 ReAct 自主决策循环。
 
         Args:
             task_message: 任务描述文本（作为 user message 传入 ReAct loop）
+            messages: 消息列表（用于多轮对话），每个元素为 (role, content) 元组，
+                      如 [("user", "你好"), ("assistant", "你好！"), ("user", "帮我搜索")]
 
         Returns:
             {
@@ -167,15 +259,60 @@ class ReactAgent:
             print("  [ReAct] [WARN] ReAct 子图未就绪，跳过")
             return None
 
-        print(f"  [ReAct] [START] 启动 ReAct 循环 (max_iterations={self.max_iterations})")
-        print(f"  [ReAct] [TOOLS] 可用工具: {[t.name for t in self.tools]}")
+        # 构建输入消息
+        if messages is not None:
+            input_messages = messages
+        elif task_message is not None:
+            input_messages = [("user", task_message)]
+        else:
+            print("  [ReAct] [WARN] run() 需要 task_message 或 messages 参数")
+            return None
+
+        print(f"  [ReAct] [START] 启动 ReAct 循环 (max_iterations={self.max_iterations}, "
+              f"messages={len(input_messages)}条)")
+
+        # 发射 ReAct 开始事件
+        if self._emitter:
+            try:
+                import asyncio
+                loop = asyncio.get_event_loop()
+                if loop.is_running():
+                    loop.create_task(self._emitter.emit("react_started", {
+                        "agent_name": self._agent_name if hasattr(self, '_agent_name') else "ReAct",
+                        "task": str(input_messages[-1])[:200] if input_messages else "",
+                        "max_iterations": self.max_iterations,
+                    }))
+            except Exception:
+                pass
+
+        # 区分 Tools（core.tools 定义）与 Skill（skill/ 包注册）
+        _tool_list = []
+        _skill_list = []
+        for t in self.tools:
+            mod = getattr(getattr(t, "func", None), "__module__", "") or ""
+            if mod.startswith("skill"):
+                _skill_list.append(t.name)
+            else:
+                _tool_list.append(t.name)
+        if _tool_list:
+            print(f"  [ReAct] [TOOLS] 可用工具: {_tool_list}")
+        if _skill_list:
+            print(f"  [ReAct] [SKILL] 可用工具: {_skill_list}")
+
+        # 挂载 ReAct THOUGHT 回调到执行链
+        _emitter_obj = _ThoughtEmitter(
+            emitter=self._emitter,
+            agent_name=getattr(self, '_agent_name', 'ReAct'),
+        )
+        _run_config = {
+            "recursion_limit": self.max_iterations * 2 + 5,
+            "callbacks": [_emitter_obj],
+        }
 
         try:
             result = await self._graph.ainvoke(
-                {"messages": [("user", task_message)]},
-                config={
-                    "recursion_limit": self.max_iterations * 2 + 5,
-                },
+                {"messages": input_messages},
+                config=_run_config,
             )
 
             messages = result.get("messages", [])
@@ -199,6 +336,20 @@ class ReactAgent:
             # 报告循环完成
             print(f"  [ReAct] [DONE] 循环完成 ({iterations} 次工具调用)")
             print(f"  [ReAct] [RESULT] 最终回复长度: {len(final_answer)} 字")
+
+            # 发射 ReAct 结束事件
+            if self._emitter:
+                try:
+                    import asyncio as _aio
+                    loop = _aio.get_event_loop()
+                    if loop.is_running():
+                        loop.create_task(self._emitter.emit("react_ended", {
+                            "agent_name": self._agent_name,
+                            "iterations": iterations,
+                            "final_answer_length": len(final_answer),
+                        }))
+                except Exception:
+                    pass
 
             return {
                 "final_answer": final_answer,

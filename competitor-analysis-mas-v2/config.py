@@ -14,7 +14,7 @@ LLM后端选择：
 import os
 from dotenv import load_dotenv
 
-# 加è½½ .env æä»¶ï¼ç¯å¢åéä¼åçº§é«äº .envï¼
+# 加载 .env 文件（环境变量优先级高于 .env）
 load_dotenv()
 
 # ========================
@@ -106,3 +106,23 @@ DEFAULT_COMPETITOR_COUNT = 5
 # ========================
 LLM_TEMPERATURE = 0.3       # 适中温度，保证分析既准确又有洞察
 LLM_MAX_TOKENS = 4096       # 竞品数据较多，增大输出上限
+
+# ========================
+# 长期记忆（Long-Term Memory）配置
+# ========================
+LTM_DB_PATH = os.environ.get("LTM_DB_PATH", "data/long_term_memory.db")
+LTM_CHROMA_DIR = os.environ.get("LTM_CHROMA_DIR", "data/chroma_memory")
+
+# ========================
+# 安全机制配置
+# ========================
+SECURITY_ENABLE_INJECTION_CHECK = True   # 启用 Prompt Injection 检测
+SECURITY_CONFIRM_HIGH_RISK = True        # 高风险操作记录确认日志
+SECURITY_DEFAULT_ROLE = "user"           # 默认角色（admin / user / guest）
+
+# ========================
+# Web 服务配置
+# ========================
+SERVER_HOST = os.environ.get("SERVER_HOST", "0.0.0.0")
+SERVER_PORT = int(os.environ.get("SERVER_PORT", "8000"))
+CORS_ORIGINS = os.environ.get("CORS_ORIGINS", "*").split(",")

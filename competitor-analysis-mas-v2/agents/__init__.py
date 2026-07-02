@@ -6,6 +6,7 @@ from .product_agent import ProductAgent
 from .pricing_agent import PricingAgent
 from .market_agent import MarketAgent
 from .strategy_agent import StrategyAgent
+from .conversational_agent import ConversationalAgent
 
 __all__ = [
     "BaseAgent",
@@ -15,4 +16,5 @@ __all__ = [
     "PricingAgent",
     "MarketAgent",
     "StrategyAgent",
+    "ConversationalAgent",
 ]

@@ -4,13 +4,23 @@ core/tools.py — ReAct Agent 工具定义
 
 工具清单：
   - web_search:        通用网页搜索（自动 Tavily / UAPI / 百度多后端降级）
+  - rag_search:       内部知识库语义检索（AI行业报告、金融科技报告等）
 """
 
+import os
 import time
 
 from langchain_core.tools import tool
 from core.search_client import SearchClient
 import config
+
+# 加载 .env
+from dotenv import load_dotenv
+load_dotenv(os.path.join(os.path.dirname(__file__), "..", "..", ".env"))
+
+
+# ── Skill 工具加载 ──────────────────────────────────────────────
+from skill.rag_skill.rag_skill import rag_search
 
 
 def _call_with_retry(
@@ -56,7 +66,7 @@ def _do_web_search(query: str) -> str:
 
 @tool
 def web_search(query: str) -> str:
-    """【首选工具】通用网页搜索。所有需要搜索信息的需求都必须优先使用此工具，不要直接编造或猜测 URL！
+    """【外部网络搜索】通用网页搜索。所有需要从互联网获取信息的需求都必须优先使用此工具。
     适用场景：竞品信息搜索、市场数据搜索、用户评价搜索、定价搜索等。
     内部自动在多个搜索后端之间降级，保证结果返回。
     返回：搜索结果摘要及多条相关结果的标题和内容片段。
@@ -73,4 +83,4 @@ def web_search(query: str) -> str:
 #  工具列表（供 ReAct Agent 注册使用）
 # ═══════════════════════════════════════════════════════════════
 
-REACT_TOOLS = [web_search]
+REACT_TOOLS = [web_search, rag_search]

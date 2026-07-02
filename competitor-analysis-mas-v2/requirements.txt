@@ -14,3 +14,12 @@ langchain-openai>=0.3.0    # LangChain OpenAI 适配器（用于 ChatOpenAI tool
 
 # ======== 搜索工具 ========
 uapi>=1.0.0                # UAPI 智能搜索客户端（用于搜索增强）
+
+# ======== RAG 知识库 ========
+openai>=1.0.0              # RAG 问答（rag_skill.py）调用 LLM 生成回答
+
+# ======== Web 服务（可选，用于前端界面） ========
+fastapi>=0.110.0           # FastAPI Web 框架
+uvicorn>=0.29.0            # ASGI 服务器
+websockets>=12.0           # WebSocket 支持
+aiohttp>=3.9.0             # 异步 HTTP 客户端（流式 LLM 调用）

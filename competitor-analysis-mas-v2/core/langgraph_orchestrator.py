@@ -48,7 +48,7 @@ class LangGraphOrchestrator:
     fan-in 时目标节点被重复调用的陷阱。
     """
 
-    def __init__(self):
+    def __init__(self, event_emitter=None):
         # ── 创建所有Agent（复用现有业务逻辑） ──
         self.discovery_agent = DiscoveryAgent()
         self.collection_agent = CollectionAgent()
@@ -56,6 +56,7 @@ class LangGraphOrchestrator:
         self.pricing_agent = PricingAgent()
         self.market_agent = MarketAgent()
         self.strategy_agent = StrategyAgent()
+        self._emitter = event_emitter
 
         # ── 编译图（一次性编译，可复用） ──
         self._graph = self._build_graph()
@@ -67,6 +68,23 @@ class LangGraphOrchestrator:
         self._last_product_analysis: ProductAnalysis = None
         self._last_pricing_analysis: PricingAnalysis = None
         self._last_market_analysis: MarketAnalysis = None
+
+    async def _emit(self, event_type: str, payload: dict = None):
+        """快捷 emit 事件（emitter 存在时）"""
+        if self._emitter:
+            try:
+                await self._emitter.emit(event_type, payload or {})
+            except Exception:
+                pass
+
+    def _stage_label(self, stage: str) -> tuple[str, int]:
+        labels = {
+            "discovery": ("竞品发现", 0),
+            "collection": ("数据采集", 1),
+            "parallel_analysis": ("并行分析", 2),
+            "strategy": ("策略建议", 3),
+        }
+        return labels.get(stage, (stage, -1))
 
     # ═══════════════════════════════════════════════════
     #  图构建
@@ -112,12 +130,33 @@ class LangGraphOrchestrator:
         print("  🔍 Phase 1: 竞品发现")
         print(f"{'█' * 65}")
 
+        label, idx = self._stage_label("discovery")
+        await self._emit("stage_started", {
+            "stage": "discovery", "label": label,
+            "stage_index": idx, "total_stages": 4, "product": state["product_description"],
+        })
+
+        user_request = state.get("user_analysis_request", state["product_description"])
         phase_start = time.time()
         competitor_list = await self.discovery_agent.run(
             state["product_description"],
-            state["max_competitors"]
+            state["max_competitors"],
+            user_request=user_request,
         )
         elapsed = time.time() - phase_start
+
+        competitors_summary = []
+        if competitor_list and competitor_list.competitors:
+            competitors_summary = [
+                {"name": c.name, "brief": c.brief[:100] if c.brief else ""}
+                for c in competitor_list.competitors
+            ]
+
+        await self._emit("stage_completed", {
+            "stage": "discovery", "label": label, "elapsed_s": round(elapsed, 2),
+            "result_summary": f"发现 {len(competitor_list.competitors)} 个竞品" if competitor_list else "无结果",
+            "competitors": competitors_summary,
+        })
 
         print(f"\n  ⏱️ 发现耗时: {elapsed:.2f}s")
         print(f"  📊 发现竞品: {len(competitor_list.competitors)}个")
@@ -134,20 +173,40 @@ class LangGraphOrchestrator:
         print("  📊 Phase 2: 数据采集")
         print(f"{'█' * 65}")
 
+        label, idx = self._stage_label("collection")
+        await self._emit("stage_started", {
+            "stage": "collection", "label": label,
+            "stage_index": idx, "total_stages": 4,
+        })
+
         competitor_list = state.get("competitor_list")
         if not competitor_list or not competitor_list.competitors:
             print("  ⚠️ 无竞品可采集")
+            await self._emit("stage_completed", {
+                "stage": "collection", "label": label, "elapsed_s": 0,
+                "result_summary": "无竞品可采集",
+                "competitor_count": 0,
+            })
             return {
                 "competitors_data": {},
                 "error": "no_competitors",
             }
 
         phase_start = time.time()
+        # 透传事件发射器给采集 Agent
+        if self._emitter:
+            self.collection_agent._react._emitter = self._emitter
         competitors_data = await self.collection_agent.run(
             state["product_description"],
             competitor_list
         )
         elapsed = time.time() - phase_start
+
+        await self._emit("stage_completed", {
+            "stage": "collection", "label": label, "elapsed_s": round(elapsed, 2),
+            "result_summary": f"采集完成: {len(competitors_data)} 个竞品",
+            "competitor_count": len(competitors_data),
+        })
 
         print(f"\n  ⏱️ 采集耗时: {elapsed:.2f}s")
         print(f"  📊 采集完成: {len(competitors_data)}个竞品")
@@ -169,6 +228,12 @@ class LangGraphOrchestrator:
         print("  ⚡ Phase 3: 三维并行分析")
         print(f"{'█' * 65}")
 
+        label, idx = self._stage_label("parallel_analysis")
+        await self._emit("stage_started", {
+            "stage": "parallel_analysis", "label": label,
+            "stage_index": idx, "total_stages": 4,
+        })
+
         product_name = state["competitor_list"].product_name
         competitors_data = state.get("competitors_data", {})
 
@@ -189,6 +254,17 @@ class LangGraphOrchestrator:
             self.pricing_agent.llm_logs +
             self.market_agent.llm_logs
         )
+
+        result_summary = (
+            f"产品分析: {len(product_analysis.feature_matrix)}个功能维度, "
+            f"定价分析: {len(pricing_analysis.pricing_comparison)}个竞品定价, "
+            f"市场分析: {len(market_analysis.market_share_data)}个竞品市场数据"
+        )
+
+        await self._emit("stage_completed", {
+            "stage": "parallel_analysis", "label": label, "elapsed_s": round(elapsed, 2),
+            "result_summary": result_summary,
+        })
 
         print(f"\n  ⏱️ 并行分析耗时: {elapsed:.2f}s")
         print(f"  🔧 产品分析: {len(product_analysis.feature_matrix)}个功能维度")
@@ -236,6 +312,12 @@ class LangGraphOrchestrator:
         print("  🎯 Phase 4: 策略建议")
         print(f"{'█' * 65}")
 
+        label, idx = self._stage_label("strategy")
+        await self._emit("stage_started", {
+            "stage": "strategy", "label": label,
+            "stage_index": idx, "total_stages": 4,
+        })
+
         competitor_list = state.get("competitor_list")
         product_name = competitor_list.product_name if competitor_list else ""
 
@@ -252,12 +334,18 @@ class LangGraphOrchestrator:
         # 聚合所有LLM日志到报告
         report.raw_llm_logs = state.get("all_llm_logs", []) + self.strategy_agent.llm_logs
 
+        await self._emit("stage_completed", {
+            "stage": "strategy", "label": label, "elapsed_s": round(elapsed, 2),
+            "result_summary": f"生成 {len(report.action_plan)} 项行动方案",
+            "action_plan_count": len(report.action_plan),
+        })
+
         print(f"\n  ⏱️ 策略耗时: {elapsed:.2f}s")
 
         return {
             "strategy_report": report,
             "timings": {**state.get("timings", {}), "strategy": elapsed},
-            "all_llm_logs": self.strategy_agent.llm_logs,
+            "all_llm_logs": state.get("all_llm_logs", []) + self.strategy_agent.llm_logs,
         }
 
     # ═══════════════════════════════════════════════════
@@ -265,18 +353,33 @@ class LangGraphOrchestrator:
     # ═══════════════════════════════════════════════════
 
     async def analyze(self, product_description: str,
-                      max_competitors: int = config.DEFAULT_COMPETITOR_COUNT) -> StrategyReport:
+                      max_competitors: int = config.DEFAULT_COMPETITOR_COUNT,
+                      user_analysis_request: str = None,
+                      event_emitter=None) -> StrategyReport:
         """
         执行完整的竞品分析流程
 
         Args:
             product_description: 用户产品描述
             max_competitors: 最大竞品数量
+            user_analysis_request: 用户原始请求
+            event_emitter: 事件发射器（用于实时推送进度）
 
         Returns:
             StrategyReport: 完整策略建议报告
         """
         total_start = time.time()
+
+        if event_emitter:
+            self._emitter = event_emitter
+
+        # 发送工作流开始事件
+        await self._emit("workflow_started", {
+            "product": product_description,
+            "stages": ["discovery", "collection", "parallel_analysis", "strategy"],
+            "total_stages": 4,
+            "max_competitors": max_competitors,
+        })
 
         print("\n" + "═" * 65)
         print("  🔍 智能竞品分析多Agent系统")
@@ -288,6 +391,7 @@ class LangGraphOrchestrator:
         initial_state: AnalysisState = {
             "product_description": product_description,
             "max_competitors": max_competitors,
+            "user_analysis_request": user_analysis_request or product_description,
             "competitor_list": None,
             "competitors_data": None,
             "product_analysis": None,
@@ -299,9 +403,15 @@ class LangGraphOrchestrator:
             "error": None,
         }
 
-        # ── 执行 DAG ──
+        # ── 执行 DAG（带异常保护） ──
         print(f"\n  🚀 启动 LangGraph DAG 执行...")
-        final_state = await self._graph.ainvoke(initial_state)
+        error = None
+        try:
+            final_state = await self._graph.ainvoke(initial_state)
+        except Exception as e:
+            error = str(e)
+            print(f"\n  ❌ DAG 执行异常: {error}")
+            final_state = initial_state
 
         # ── 统计总耗时 ──
         total_elapsed = time.time() - total_start
@@ -310,10 +420,26 @@ class LangGraphOrchestrator:
 
         self.timings = timings
 
+        if error:
+            await self._emit("workflow_error", {
+                "error": error, "elapsed_s": round(total_elapsed, 2),
+            })
+            report = StrategyReport(product_name=product_description)
+            return report
+
         # ── 获取报告 ──
         report = final_state.get("strategy_report")
         if report is None:
             report = StrategyReport(product_name=product_description)
+
+        # ── 工作流完成事件 ──
+        await self._emit("workflow_completed", {
+            "product_name": report.product_name,
+            "elapsed_s": round(total_elapsed, 2),
+            "competitor_count": report.competitor_count,
+            "action_plan_count": len(report.action_plan),
+            "summary": report.summary[:200] if report.summary else "",
+        })
 
         # ── 缓存数据（供HTML报告生成） ──
         self._last_competitor_list = final_state.get("competitor_list")

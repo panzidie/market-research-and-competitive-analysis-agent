@@ -25,6 +25,7 @@ class AnalysisState(TypedDict, total=False):
     # ── 输入参数 ──
     product_description: str
     max_competitors: int
+    user_analysis_request: str               # 用户原始需求描述（用于 LLM 理解分析策略）
 
     # ── Phase 1 输出 ──
     competitor_list: CompetitorList

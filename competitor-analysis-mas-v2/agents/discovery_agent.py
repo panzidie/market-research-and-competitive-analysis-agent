@@ -30,18 +30,28 @@ class DiscoveryAgent(BaseAgent):
         self.search_client = SearchClient()
 
     async def run(self, product_description: str,
-                  max_competitors: int = config.DEFAULT_COMPETITOR_COUNT) -> CompetitorList:
+                  max_competitors: int = config.DEFAULT_COMPETITOR_COUNT,
+                  user_request: str = None) -> CompetitorList:
         """
-        主运行逻辑：生成搜索关键词 → 搜索 → 筛选竞品
+        主运行逻辑：分析用户原话意图 → 生成搜索关键词 → 搜索 → 筛选竞品
 
         Args:
             product_description: 用户产品描述
             max_competitors: 最大竞品数量
+            user_request: 用户原始需求（LLM 据此理解分析范围、竞品数量等策略）
 
         Returns:
             CompetitorList: 发现的竞品列表
         """
         self._log(f"🔍 开始发现竞品: {product_description[:50]}...")
+
+        # ── 步骤0: LLM 智能理解用户需求（分析几个竞品、什么范围等） ──
+        analysis_strategy = self._understand_request(user_request or product_description)
+        if analysis_strategy:
+            count = analysis_strategy.get("competitor_count", max_competitors)
+            max_competitors = max(1, min(count, config.MAX_COMPETITORS))
+            self._log(f"   LLM分析策略: 竞品数量={max_competitors}, "
+                      f"范围={analysis_strategy.get('scope', '默认')}")
 
         # ── 步骤1: 生成搜索关键词 ──
         keywords = self._generate_keywords(product_description)
@@ -61,6 +71,26 @@ class DiscoveryAgent(BaseAgent):
             self._log(f"   • {c.name} ({c.relevance}): {c.brief[:40]}...")
 
         return competitor_list
+
+    def _understand_request(self, user_request: str) -> dict | None:
+        """LLM 理解用户原始需求，提取分析策略（竞品数量、范围等）"""
+        if not config.ENABLE_LLM or not user_request:
+            return None
+
+        prompt = f"""你是竞品分析策略分析师。阅读用户的原始需求，提取分析策略。
+
+用户原始需求：{user_request}
+
+请分析：
+1. 用户想分析几个竞品？提取具体数字（没指定则默认 5）
+2. 分析范围是什么？（如同类产品、替代品、特定领域等）
+
+只返回 JSON：{{"competitor_count": 数字, "scope": "范围描述"}}"""
+
+        result = self.ask_llm_json(prompt, temperature=0.1, max_tokens=200)
+        if result and "competitor_count" in result:
+            return result
+        return None
 
     def _generate_keywords(self, product_description: str) -> list[str]:
         """生成搜索关键词（LLM + 规则引擎降级）"""

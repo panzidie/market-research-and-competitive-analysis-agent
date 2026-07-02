@@ -30,41 +30,33 @@ import json
 REACT_SYSTEM_PROMPT = """你是一个专业的数据采集专家，负责搜索并汇总竞品的详细信息。
 
 ## 任务
-对指定的竞品，通过网络搜索收集以下七个维度的信息：
-1. product_features — 核心产品功能、与竞品的差异点
-2. pricing_info — 定价策略、免费/付费版本、具体价格
-3. market_share — 用户量、市占率、增长趋势
-4. user_reviews — 正面/负面评价关键词
-5. strengths — 相比我方产品的优势
-6. weaknesses — 相比我方产品的劣势
-7. channels — 销售渠道、合作伙伴
+对指定的竞品，使用 web_search 或 rag_search 工具搜索公开信息，然后汇总输出。
 
-## 工具使用
-- web_search（通用搜索，所有搜索需求用此工具，内部自动降级）
+需要收集的信息维度（供参考，搜到什么算什么，不要求全部覆盖）：
+- product_features, pricing_info, market_share, user_reviews,
+- strengths, weaknesses, channels
 
-## 搜索策略
-- 可以用多组不同关键词搜索不同维度
-- 如果某个维度数据不足，换角度再搜
+## 可用工具
+- **web_search（外部网络搜索）**：搜索竞品功能、定价、份额等公开信息，优先使用
+- **rag_search（内部知识库）**：仅 AI/金融科技行业背景查询
 
-## 自主决策原则
-- 你要自己决定用什么关键词搜索、搜索几次
-- 当你认为七个维度的信息都已充分收集，调用 Final Answer 返回结果
-- 如果某个维度确实无法找到信息，标注"暂无公开数据"即可
+## 规则
+- **必须先调用工具搜索，不得凭空编造**。如果没搜到，标注"暂无公开数据"
+- 搜索 1-3 轮、收集到关键信息后即可输出结果
+- 自由选择工具和关键词，不限制调用顺序
 
-## 输出格式（强制）
-当你认为七个维度的信息已充分收集，或已达最大搜索次数，你必须调用 Final Answer 返回结果。
-Final Answer 的内容必须是一个纯 JSON 对象（不要加 ```json ``` 包裹，不要加任何解释文字），包含以下七个字段：
+## 输出格式
+当你认为信息已足够，输出纯 JSON（不要 ```json ``` 包裹，不要加解释文字）：
 {
-  "product_features": "核心产品功能描述",
-  "pricing_info": "定价策略描述",
-  "market_share": "市场份额描述",
-  "user_reviews": "用户评价描述",
-  "strengths": "相比我方产品的优势",
-  "weaknesses": "相比我方产品的劣势",
-  "channels": "销售渠道描述"
+  "product_features": "...",
+  "pricing_info": "...",
+  "market_share": "...",
+  "user_reviews": "...",
+  "strengths": "...",
+  "weaknesses": "...",
+  "channels": "..."
 }
-
-重要：Final Answer 必须以 { 开头，以 } 结尾。不要输出任何 JSON 以外的内容。
+Final Answer 必须以 { 开头，以 } 结尾。
 """
 
 
@@ -86,6 +78,7 @@ class CollectionAgent(BaseAgent):
             tools=REACT_TOOLS,
             max_iterations=5,
         )
+        self._react._agent_name = "CollectionAgent"
         mode = "ReAct" if self._react.is_available else "传统（无可用模型）"
         self._log(f"初始化完成 — 模式: {mode}")
 
@@ -156,11 +149,8 @@ class CollectionAgent(BaseAgent):
             f"请搜索竞品「{competitor_name}」的详细信息。\n\n"
             f"我方产品：{product_name}\n"
             f"我方产品描述：{product_description}\n\n"
-            f"请使用工具搜索该竞品的产品功能、定价、市场份额、用户评价、"
-            f"优势、劣势、销售渠道七个维度的信息。\n\n"
-            f"提示：\n"
-            f"1. 用 web_search 搜索，内部自动降级\n"
-            f"2. 可以用多组不同关键词搜索不同维度"
+            f"重要：必须使用 web_search 或 rag_search 工具搜索信息，不要凭空编造。\n"
+            f"搜索该竞品的产品功能、定价、市场份额、用户评价等维度的信息。"
         )
 
         # 运行 ReAct 循环
@@ -220,13 +210,13 @@ class CollectionAgent(BaseAgent):
             if hasattr(msg, "content") and hasattr(msg, "name"):
                 content = str(msg.content)
                 name = getattr(msg, "name", "unknown")
-                if name in ("web_search",):
+                if name in ("web_search", "rag_search"):
                     sources.append(content[:500])
                     # 从搜索结果文本中提取 URL
                     for url in re.findall(r'https?://[^\s\)\]]+', content):
                         if url not in seen_urls:
                             seen_urls.add(url)
-                            links.append({"title": "", "url": url, "query_context": "web_search"})
+                            links.append({"title": "", "url": url, "query_context": name})
 
             # 如果消息有 additional_kwargs 中的搜索结果信息也可以提取
             # （简化处理：主要从 tool 返回中提取）

@@ -11,7 +11,9 @@ LLM调用：1次
 from agents.base_agent import BaseAgent
 from models.domain import (
     ProductAnalysis, PricingAnalysis, MarketAnalysis,
-    StrategyReport, ActionItem
+    StrategyReport, ActionItem,
+    CompetitorData,
+    CompetitiveAdvantage, PricingItem, MarketShareItem,
 )
 from core.prompt_loader import load as load_prompts
 import config
@@ -250,7 +252,6 @@ class StrategyAgent(BaseAgent):
         import html as html_mod
         import re
         from datetime import datetime
-        from models.domain import CompetitorData, FeatureComparison, CompetitiveAdvantage, PricingItem, MarketShareItem
 
         now = datetime.now().strftime("%Y-%m-%d %H:%M")
 

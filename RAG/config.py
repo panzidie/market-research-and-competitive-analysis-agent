@@ -9,8 +9,8 @@ from typing import Optional
 
 @dataclass
 class ChunkConfig:
-    size: int = 300
-    overlap: int = 50
+    size: int = 600
+    overlap: int = 80
 
 
 @dataclass
@@ -27,7 +27,7 @@ class RetrievalConfig:
 @dataclass
 class VectorStoreConfig:
     persist_dir: str = "chroma_db"
-    collection_name: str = "campus"
+    collection_name: str = "iResearch_Report"
 
 
 @dataclass
@@ -38,8 +38,8 @@ class AppConfig:
     vector_store: VectorStoreConfig = field(default_factory=VectorStoreConfig)
 
     data_dir: str = "data"
-    # PDF 文件路径列表
-    pdf_files: tuple[str, ...] = ("data/campus_manual.pdf", "data/library_rules.pdf")
+    # PDF 文件路径列表（空列表表示扫描 data_dir 下所有 .pdf）
+    pdf_files: tuple[str, ...] = ()
 
     _root_dir: str = ""
 
