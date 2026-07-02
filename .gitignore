@@ -42,3 +42,6 @@ doct/
 # Agent / IDE artifacts
 .claude/worktrees/
 .workbuddy/
+
+# Web dependencies
+competitor-analysis-mas-v2/web/node_modules/

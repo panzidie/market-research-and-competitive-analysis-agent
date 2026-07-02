@@ -61,9 +61,10 @@ def main():
     if os.path.isdir(web_dist):
         app.mount("/", StaticFiles(directory=web_dist, html=True), name="frontend")
 
-    print(f"  🌐 API 服务: http://{host}:{port}")
-    print(f"  📡 WebSocket: ws://{host}:{port}/ws/{{session_id}}")
-    print(f"  📋 文档:     http://{host}:{port}/docs")
+    display_host = "localhost" if host == "0.0.0.0" else host
+    print(f"  🌐 API 服务: http://{display_host}:{port}")
+    print(f"  📡 WebSocket: ws://{display_host}:{port}/ws/{{session_id}}")
+    print(f"  📋 文档:     http://{display_host}:{port}/docs")
     uvicorn.run(app, host=host, port=port, log_level="info")
 
 
